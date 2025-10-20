@@ -1,0 +1,25 @@
+{
+  "searchers": {
+    "brandName": "The Searchers Podcast",
+    "hosts": ["Atem Bior", "Kirron Byrne"],
+    "cta": "🎧 Full episodes on Spotify. 🎥 Clips + full video on YouTube. Subscribe & leave a review!",
+    "links": {
+      "spotify": "https://open.spotify.com/show/2GRrhtrHF5zjPTmvEriXpT",
+      "apple": "https://podcasts.apple.com/au/podcast/the-searchers-podcast/id1656166965",
+      "anchor": "https://anchor.fm/s/cd2722d4/podcast/rss",
+      "youtube": "https://www.youtube.com/@thesearcherspodcast",
+      "patreon": "https://patreon.com/u15047571?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink",
+      "tiktok": "http://tiktok.com/@thesearcherspodcast",
+      "facebook": "https://www.facebook.com/profile.php?id=100090537573686&mibextid=LQQJ4d",
+      "instagram": "https://www.instagram.com/thesearcherspodcast/"
+    }
+  },
+  "atem-bior-project": {
+    "brandName": "The Atem Bior Project",
+    "hosts": ["Atem Bior"],
+    "cta": "New conversations weekly — subscribe wherever you get your podcasts.",
+    "links": {
+      "youtube": "https://www.youtube.com/@madebykings"
+    }
+  }
+}

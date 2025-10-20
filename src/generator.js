@@ -1,185 +1,224 @@
-import { parseTimestamps } from "./utils.js";
+// generator.js
 import inquirer from "inquirer";
+import {
+  parseTimestamps,
+  generateTags,
+  appendCTA,
+  toSentenceCasePreserveAcronyms,
+} from "./utils.js";
 
+/**
+ * Light SEO prompt (optional, can be skipped with --no-seo in the CLI).
+ * Kept simple until you wire in OpenAI later.
+ */
 export async function promptForSEODetails() {
   const answers = await inquirer.prompt([
     {
       name: "mainKeyword",
       type: "input",
-      message: "What is the main keyword or topic for this episode?",
+      message: "Main keyword or topic (optional):",
+      default: "",
     },
     {
       name: "guestExpertise",
       type: "input",
-      message: "What is the guest's expertise or background?",
+      message: "Guest expertise/background (optional):",
+      default: "",
     },
     {
       name: "targetAudience",
       type: "input",
-      message: "Who is the target audience for this episode?",
+      message: "Target audience (optional):",
+      default: "",
     },
     {
       name: "keyTakeaways",
-      type: "inout",
-      message: "What are the key takeaways for this episode? (3-5 bullet points)",
+      type: "input", // <- fixed 'inout' typo
+      message: "Key takeaways (3–5 bullets; optional):",
+      default: "",
     },
   ]);
   return answers;
 }
 
-const DEFAULT_PRIMARY_TAGS = [
-  "the searchers podcast", "atem bior", "kirron byrne",
-  "australian podcast", "self improvement podcast", "motivation podcast",
-  "basketball podcast", "leadership podcast"
-];
-
-const DEFAULT_SECONDARY_TAGS = [
-  "growth mindset", "athlete mindset", "coaching", "culture",
-  "personal stories", "life lessons", "australia", "south sudan"
-];
-
-const DEFAULT_HASHTAGS = [
-  "#TheSearchersPodcast", "#AtemBior", "#KirronByrne",
-  "#PodcastAustralia", "#SelfImprovement", "#MotivationPodcast"
-];
-
+/**
+ * Generate Markdown for an episode description.
+ * Keep inputs minimal: title (optional), summary (short), timestampsRaw (file contents), links + brand.
+ */
 export function generateEpisodeMarkdown({
   title,
-  guest,
-  hosts,
-  brandName,
+  guest = "",
+  hosts = "",
+  brandName = "The Searchers Podcast",
+  cta = "",
   summary,
   timestampsRaw,
-  links,
+  links = {},
   keepEmoji = false,
   seo = {},
 }) {
+  // 1) Parse timestamps → chapters
   const chapters = parseTimestamps(timestampsRaw, { keepEmoji });
-  const resolvedTitle = title || autoTitle({ summary, guest, brandName });
 
-  const primaryTags = dedupe([
-    ...DEFAULT_PRIMARY_TAGS,
-    ...autoPrimaryTags(summary, guest),
-    seo.mainKeyword,
-    seo.guestExpertise,
-  ]);
-  const secondaryTags = dedupe([
-    ...DEFAULT_SECONDARY_TAGS,
-    ...autoSecondaryTags(summary),
-  ]);
-  const hashtags = dedupe([...DEFAULT_HASHTAGS, ...autoHashtags(summary)]);
+  // 2) Resolve title (stable + sensible without AI)
+  const resolvedTitle = title?.trim() || autoTitle({ summary, guest, brandName });
 
-  const description = [
-    normalizeSummary(summary, { hosts, guest, brandName }),
-    seo.keyTakeaways ? `\n**Key Takeaways:**\n${seo.keyTakeaways}` : "",
-  ].join("\n");
+  // 3) Description body (clean, concise, SEO-friendly without being spammy)
+  const descriptionBody = buildDescription({ summary, hosts, guest, brandName, seo });
 
+  // 4) Tags + Hashtags (simple, deterministic)
+  const { tags, hashtags } = buildTags({
+    brandName,
+    hosts,
+    guest,
+    summary,
+    seo,
+  });
+
+  // 5) Platforms block + CTA
+  const platformsBlock = renderPlatforms(links);
+  const withCTA = appendCTA(platformsBlock, { cta, links });
+
+  // 6) Final Markdown
   return [
-`## 🎙️ **Episode Title**
-**${resolvedTitle}**
+    `## 🎙️ **${escapeMD(resolvedTitle)}**`,
 
-## 📝 **Episode Description**
-${description}
+    `## 📝 Episode Description
+${descriptionBody}`,
 
-## 💬 **Timestamps**`,
-renderChapters(chapters),
-`## 🎧 **Listen on Spotify, Apple & More**
-Spotify → ${links.spotify}
-Apple Podcasts → ${links.apple}
-Anchor (RSS) → ${links.anchor}
+    `## ⏱️ Chapters`,
+    renderChapters(chapters),
 
-## 🏷️ **Primary Tags**
-${primaryTags.join(", ")}
+    `## 🔗 Listen & Subscribe`,
+    withCTA,
 
-## 🔖 **Secondary Tags**
-${secondaryTags.join(", ")}
+    `## 🏷️ Tags`,
+    tags.join(", "),
 
-## 🏷️ **Hashtags**
-${hashtags.join(" ")}
+    `## 🔖 Hashtags`,
+    hashtags,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
 
-## 🪙 **Support ${brandName} on Patreon**
-We’re building this from the ground up — real convos, real energy. Your support helps us drop more episodes, upgrade our setup, and bring in guests who elevate the conversation.
+// --------------------------- helpers ---------------------------
 
-🪙 **Join the movement for just $10/month:**  
-${links.patreon}
+function buildDescription({ summary, hosts, guest, brandName, seo }) {
+  const cleanSummary = ensureSentence(summary);
+  const hostLine = hosts ? `Hosted by **${hosts}**` : "";
+  const guestLine = guest ? (hostLine ? ` with **${guest}**` : `Featuring **${guest}**`) : "";
 
-You’ll get:
-* Early episode access
-* Behind-the-scenes clips
-* Your name shouted out on the show
-* A front-row seat in our journey 💯
+  const lines = [
+    `In this episode of **${brandName}**, ${[hostLine, guestLine].filter(Boolean).join(" ")}`.trim(),
+    cleanSummary,
+  ].filter(Boolean);
 
-## 📲 **Follow ${brandName} @THESEARCHERSPODCAST**
-Anchor - ${links.anchor}
-Spotify - ${links.spotify}
-Apple - ${links.apple}
-TikTok - ${links.tiktok}
-Facebook - ${links.facebook}
-Instagram - ${links.instagram}
-MBK Digital (clips) - ${links.mbk}
-`
-  ].join("\n\n");
+  if (seo?.keyTakeaways) {
+    const bullets = normaliseBullets(seo.keyTakeaways);
+    if (bullets.length) {
+      lines.push(`**Key Takeaways:**\n${bullets.map((b) => `- ${b}`).join("\n")}`);
+    }
+  }
+
+  return lines.join("\n\n");
+}
+
+function ensureSentence(s = "") {
+  const t = s.trim().replace(/\s+/g, " ");
+  if (!t) return "";
+  return /[.!?…]$/.test(t) ? t : `${t}.`;
+}
+
+function normaliseBullets(raw = "") {
+  // Accepts comma-, newline-, or dash-separated bites and tidies each one.
+  const parts = raw
+    .split(/\r?\n|,|·|•|—|-{1,2}/)
+    .map((x) => toSentenceCasePreserveAcronyms(x.trim()))
+    .filter((x) => x.length > 0);
+  // Keep it tight
+  return parts.slice(0, 5);
 }
 
 function renderChapters(chapters) {
-  if (!chapters.length) return "_No timestamps provided._";
-  return chapters.map(c => `${c.time} – ${c.label}`).join("\n");
+  if (!chapters || chapters.length === 0) return "_No timestamps provided._";
+  // Markdown-friendly list; safe for YouTube copy-paste as well.
+  // e.g. "- 0:05 — Intro"
+  return chapters.map((c) => `- ${c.time} — ${escapeMD(c.label)}`).join("\n");
 }
 
-function normalizeSummary(summary, { hosts, guest, brandName }) {
-  // Ensure we mention hosts + guest for SEO
-  const hostLine = hosts ? `**${hosts}**` : "**Atem Bior**";
-  const guestLine = guest ? ` with **${guest}**` : "";
-  const base = summary.trim().replace(/\s+/g, " ");
-  return `In this episode of **${brandName}**, ${hostLine}${guestLine} ${ensurePeriod(base)}`;
+function renderPlatforms(links = {}) {
+  const rows = [
+    ["YouTube", links.youtube],
+    ["Spotify", links.spotify],
+    ["Apple Podcasts", links.apple],
+    ["RSS", links.anchor],
+    ["Instagram", links.instagram],
+    ["TikTok", links.tiktok],
+    ["Facebook", links.facebook],
+    ["Patreon", links.patreon],
+  ].filter(([, url]) => !!url);
+
+  if (!rows.length) return "_Links coming soon._";
+
+  return rows.map(([name, url]) => `${name}: ${url}`).join("\n");
 }
 
-function ensurePeriod(s) {
-  return /[.!?]$/.test(s) ? s : s + ".";
+function buildTags({ brandName, hosts, guest, summary, seo }) {
+  // Defaults biased to your brand but not spammy
+  const baseGuests = guest
+    ? String(guest)
+        .split(",")
+        .map((g) => g.trim())
+        .filter(Boolean)
+    : [];
+
+  const basic = {
+    title: `${brandName} ${guest ? `with ${guest}` : ""}`.trim(),
+    theme: (seo?.mainKeyword || "").trim(),
+    guests: baseGuests,
+  };
+
+  const gen = generateTags(basic);
+  // Sprinkle a few brand anchors (keep under 15 total in utils)
+  const extra = [
+    brandName.toLowerCase(),
+    ...(hosts ? hosts.split(",").map((h) => h.trim().toLowerCase()) : []),
+  ].filter(Boolean);
+
+  const merged = Array.from(new Set([...gen.tags, ...extra.map((t) => t.replace(/\s+/g, ""))]));
+  return {
+    tags: merged,
+    hashtags: merged.map((t) => `#${t}`).join(" "),
+  };
 }
 
 function autoTitle({ summary, guest, brandName }) {
-  const core = pickKeywords(summary, ["basketball","parent","athlete","leadership","culture","faith","love","career","motivation","coaching"]);
-  const parts = [];
-  if (core.length) parts.push(core.slice(0,3).map(cap).join(", "));
-  if (guest) parts.push(`With ${guest}`);
-  parts.push(`${brandName}`);
-  return `${parts.join(" | ")}`;
+  // Dead-simple, deterministic title maker:
+  // 1) take first 8–12 words from summary,
+  // 2) sentence-case,
+  // 3) append guest & brand lightly.
+  const first = summaryToPhrase(summary, 10);
+  const bits = [first];
+
+  if (guest) bits.push(`with ${guest}`);
+  bits.push(brandName);
+
+  return bits.filter(Boolean).join(" | ");
 }
 
-function autoPrimaryTags(summary, guest) {
-  const kws = pickKeywords(summary, ["athlete","parenting","basketball","coaching","leadership","women in sport","performance","mindset","australian institute of sport","wnbl","nbl1"]);
-  const out = [...kws];
-  if (guest) out.push(`${guest.toLowerCase()} interview`);
-  return out;
+function summaryToPhrase(s = "", wordLimit = 10) {
+  const words = s
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, wordLimit);
+  const phrase = words.join(" ");
+  return toSentenceCasePreserveAcronyms(phrase);
 }
 
-function autoSecondaryTags(summary) {
-  return pickKeywords(summary, ["youth sport","junior development","mental skills","injury and recovery","habits","team culture","motivation tips","work life balance"])
-}
-
-function autoHashtags(summary) {
-  const base = [];
-  if (/basketball/i.test(summary)) base.push("#BasketballPodcast", "#NBL1", "#WNBL");
-  if (/parent/i.test(summary)) base.push("#SportsParenting");
-  if (/athlete|performance/i.test(summary)) base.push("#AthleteMindset");
-  if (/leadership/i.test(summary)) base.push("#LeadershipPodcast");
-  return base;
-}
-
-function pickKeywords(text, candidates) {
-  const t = (text || "").toLowerCase();
-  return candidates.filter(k => t.includes(k.split(" ")[0]));
-}
-
-function cap(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
-
-function dedupe(arr){
-  const seen = new Set();
-  return arr.filter(x => {
-    const k = x.toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+function escapeMD(s = "") {
+  // Minimal escaping to avoid accidental MD formatting in labels/titles
+  return s.replace(/([*_`])/g, "\\$1");
 }
